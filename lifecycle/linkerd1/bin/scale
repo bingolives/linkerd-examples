@@ -20,13 +20,11 @@ if [ "$REPLICAS" -gt 100 ]; then
   exit 1
 fi
 
-echo "Scaling $NAMESPACES injected, TLS, and baseline namespaces to $REPLICAS replicas..."
+echo "Scaling $NAMESPACES daemonset-enabled namespaces to $REPLICAS replicas..."
 
 for i in `seq 1 $NAMESPACES`;
 do
   NS=lifecycle$i
 
   scale "$NS"
-  scale "$NS-tls"
-  scale "$NS-baseline"
 done

@@ -31,6 +31,13 @@ spec:
       - image: buoyantio/slow_cooker:1.1.1
         imagePullPolicy: IfNotPresent
         name: slow-cooker
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: http_proxy
+          value: http://l5d.linkerd.svc.cluster.local:4140
         command:
         - "/bin/sh"
         args:
@@ -42,7 +49,7 @@ spec:
             -concurrency 10 \
             -interval 30s \
             -metric-addr 0.0.0.0:9990 \
-            http://bb-p2p:7070
+            http://bb-p2p.lifecycle1
         ports:
         - name: slow-cooker
           containerPort: 9990
@@ -59,7 +66,7 @@ spec:
   selector:
     app: bb-p2p
   ports:
-  - name: bb-p2p-http1
+  - name: http
     port: 7070
     targetPort: 7070
 ---
@@ -80,6 +87,13 @@ spec:
       - image: buoyantio/bb:v0.0.3
         imagePullPolicy: IfNotPresent
         name: bb-p2p
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: http_proxy
+          value: http://l5d.linkerd.svc.cluster.local:4340
         command:
         - "/bin/bash"
         args:
@@ -87,11 +101,11 @@ spec:
         - |
           exec \
           /out/bb point-to-point-channel \
-          --grpc-downstream-server=bb-broadcast:8080 \
+          --grpc-downstream-server=bb-broadcast.lifecycle1 \
           --h1-server-port=7070
         ports:
         - containerPort: 7070
-          name: bb-p2p-http1
+          name: http
 ---
 
 #
@@ -105,7 +119,7 @@ spec:
   selector:
     app: bb-broadcast
   ports:
-  - name: bb-bcast-grpc
+  - name: grpc
     port: 8080
     targetPort: 8080
 ---
@@ -126,6 +140,13 @@ spec:
       - image: buoyantio/bb:v0.0.3
         imagePullPolicy: IfNotPresent
         name: bb-broadcast
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: http_proxy
+          value: http://l5d.linkerd.svc.cluster.local:4340
         command:
         - "/bin/bash"
         args:
@@ -133,20 +154,20 @@ spec:
         - |
           exec \
           /out/bb broadcast-channel \
-          --grpc-downstream-server=bb-terminus1:9090 \
-          --grpc-downstream-server=bb-terminus2:9090 \
-          --grpc-downstream-server=bb-terminus3:9090 \
-          --grpc-downstream-server=bb-terminus4:9090 \
-          --grpc-downstream-server=bb-terminus5:9090 \
-          --grpc-downstream-server=bb-terminus6:9090 \
-          --grpc-downstream-server=bb-terminus7:9090 \
-          --grpc-downstream-server=bb-terminus8:9090 \
-          --grpc-downstream-server=bb-terminus9:9090 \
-          --grpc-downstream-server=bb-terminus10:9090 \
+          --grpc-downstream-server=bb-terminus1.lifecycle1 \
+          --grpc-downstream-server=bb-terminus2.lifecycle1 \
+          --grpc-downstream-server=bb-terminus3.lifecycle1 \
+          --grpc-downstream-server=bb-terminus4.lifecycle1 \
+          --grpc-downstream-server=bb-terminus5.lifecycle1 \
+          --grpc-downstream-server=bb-terminus6.lifecycle1 \
+          --grpc-downstream-server=bb-terminus7.lifecycle1 \
+          --grpc-downstream-server=bb-terminus8.lifecycle1 \
+          --grpc-downstream-server=bb-terminus9.lifecycle1 \
+          --grpc-downstream-server=bb-terminus10.lifecycle1 \
           --grpc-server-port=8080
         ports:
         - containerPort: 8080
-          name: bb-bcast-grpc
+          name: grpc
 ---
 
 #
@@ -160,7 +181,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -172,7 +193,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -184,7 +205,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -196,7 +217,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -208,7 +229,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -220,7 +241,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -232,7 +253,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -244,7 +265,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -256,7 +277,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -268,7 +289,7 @@ spec:
   selector:
     app: bb-terminus
   ports:
-  - name: bb-term-grpc
+  - name: grpc
     port: 9090
     targetPort: 9090
 ---
@@ -289,6 +310,13 @@ spec:
       - image: buoyantio/bb:v0.0.3
         imagePullPolicy: IfNotPresent
         name: bb-terminus
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: http_proxy
+          value: http://l5d.linkerd.svc.cluster.local:4340
         command:
         - "/bin/bash"
         args:
@@ -300,7 +328,7 @@ spec:
           --response-text=BANANA0
         ports:
         - containerPort: 9090
-          name: bb-term-grpc
+          name: grpc
 ---
 
 #
