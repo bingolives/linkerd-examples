@@ -1,19 +1,14 @@
-# Linkerd lifecycle test configuration
+# Linkerd1 lifecycle test configuration
 
-Production testing Linkerd2's discovery & caching.
+Production testing Linkerd1's discovery & caching.
 
-The goal of this test suite is to run an outbound proxy for a prolonged amount
-of time in a dynamically-scheduled environment in order to exercise:
-- Route resource lifecyle (i.e. routes are properly evicted)
-- Telemetry resource lifecycle (i.e. prometheus can run steadily for a long
-  time, proxy doesn't leak memory in exporter).
-- Service discovery lifecycle (i.e. updates are honored correctly, doesn't get
-  out sync).
+This test is similar to the [Linkerd2](../) lifecycle environment. Differences
+are documented here.
 
 ## First time setup
 
-This environment creates a `ClusterRole`, which requires your user to have this
-ability.
+[`lifecycle.yml`](lifecycle.yml) creates a `ClusterRole`, which requires your
+user to have this ability.
 
 ```bash
 kubectl create clusterrolebinding cluster-admin-binding-$USER \
@@ -21,6 +16,20 @@ kubectl create clusterrolebinding cluster-admin-binding-$USER \
 ```
 
 ## Batch Deploy / Scale / Teardown
+
+Deploy a Linkerd daemonset to the `linkerd` namespace:
+
+```bash
+kubectl apply -f ../../k8s-daemonset/k8s/servicemesh.yml
+```
+
+Deploy the lifecycle environment in 3 namespaces:
+
+```bash
+bin/deploy 3
+```
+
+
 
 Deploy 3 lifecycle environments:
 
