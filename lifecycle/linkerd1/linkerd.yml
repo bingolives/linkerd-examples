@@ -1,0 +1,570 @@
+#
+# Linkerd1 Lifecycle configs
+#
+
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: linkerd
+
+# RBAC configs for linkerd
+---
+# grant linkerd/namerd permissions to enable service discovery
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: linkerd-endpoints-reader
+rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["endpoints", "services", "pods"] # pod access is required for the *-legacy.yml examples in this folder
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [ "extensions" ]
+    resources: [ "ingresses" ]
+    verbs: ["get", "watch", "list"]
+---
+# grant namerd permissions to custom resource definitions in k8s 1.8+ and third party resources in k8s < 1.8 for dtab storage
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: namerd-dtab-storage
+rules:
+  - apiGroups: ["l5d.io"]
+    resources: ["dtabs"]
+    verbs: ["get", "watch", "list", "update", "create"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: linkerd-role-binding
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: linkerd
+roleRef:
+  kind: ClusterRole
+  name: linkerd-endpoints-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: namerd-role-binding
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: linkerd
+roleRef:
+  kind: ClusterRole
+  name: namerd-dtab-storage
+  apiGroup: rbac.authorization.k8s.io
+#
+# Linkerd configs
+#
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: l5d-config
+  namespace: linkerd
+data:
+  config.yaml: |-
+    admin:
+      ip: 0.0.0.0
+      port: 9990
+    namers:
+    - kind: io.l5d.k8s
+    - kind: io.l5d.k8s
+      prefix: /io.l5d.k8s.http
+      transformers:
+      - kind: io.l5d.k8s.daemonset
+        namespace: linkerd
+        port: http-incoming
+        service: l5d
+    - kind: io.l5d.k8s
+      prefix: /io.l5d.k8s.h2
+      transformers:
+      - kind: io.l5d.k8s.daemonset
+        namespace: linkerd
+        port: h2-incoming
+        service: l5d
+    - kind: io.l5d.k8s
+      prefix: /io.l5d.k8s.grpc
+      transformers:
+      - kind: io.l5d.k8s.daemonset
+        namespace: linkerd
+        port: grpc-incoming
+        service: l5d
+        # hostNetwork: true # Uncomment if using host networking (eg for CNI)
+    - kind: io.l5d.rewrite
+      prefix: /portNsSvcToK8s
+      pattern: "/{port}/{ns}/{svc}"
+      name: "/k8s/{ns}/{port}/{svc}"
+
+    telemetry:
+    - kind: io.l5d.prometheus # Expose Prometheus style metrics on :9990/admin/metrics/prometheus
+    - kind: io.l5d.recentRequests
+      sampleRate: 0.25 # Tune this sample rate before going to production
+
+    usage:
+      orgId: linkerd-examples-servicemesh
+
+    routers:
+    - label: http-outgoing
+      protocol: http
+      servers:
+      - port: 4140
+        ip: 0.0.0.0
+
+      dtab: |
+        /ph  => /$/io.buoyant.rinet ;                     # /ph/80/google.com -> /$/io.buoyant.rinet/80/google.com
+        /svc => /ph/80 ;                                  # /svc/google.com -> /ph/80/google.com
+        /svc => /$/io.buoyant.porthostPfx/ph ;            # /svc/google.com:80 -> /ph/80/google.com
+        /k8s => /#/io.l5d.k8s.http ;                      # /k8s/default/http/foo -> /#/io.l5d.k8s.http/default/http/foo
+        /portNsSvc => /#/portNsSvcToK8s ;                 # /portNsSvc/http/default/foo -> /k8s/default/http/foo
+        /host => /portNsSvc/http/default ;                # /host/foo -> /portNsSvc/http/default/foo
+        /host => /portNsSvc/http ;                        # /host/default/foo -> /portNsSvc/http/default/foo
+        /svc => /$/io.buoyant.http.domainToPathPfx/host ; # /svc/foo.default -> /host/default/foo
+
+    - label: http-incoming
+      protocol: http
+      servers:
+      - port: 4141
+        ip: 0.0.0.0
+      interpreter:
+        kind: default
+        transformers:
+        - kind: io.l5d.k8s.localnode
+          # hostNetwork: true # Uncomment if using host networking (eg for CNI)
+      dtab: |
+        /k8s => /#/io.l5d.k8s ;                           # /k8s/default/http/foo -> /#/io.l5d.k8s/default/http/foo
+        /portNsSvc => /#/portNsSvcToK8s ;                 # /portNsSvc/http/default/foo -> /k8s/default/http/foo
+        /host => /portNsSvc/http/default ;                # /host/foo -> /portNsSvc/http/default/foo
+        /host => /portNsSvc/http ;                        # /host/default/foo -> /portNsSvc/http/default/foo
+        /svc => /$/io.buoyant.http.domainToPathPfx/host ; # /svc/foo.default -> /host/default/foo
+
+    - label: h2-outgoing
+      protocol: h2
+      servers:
+      - port: 4240
+        ip: 0.0.0.0
+      dtab: |
+        /ph  => /$/io.buoyant.rinet ;                       # /ph/80/google.com -> /$/io.buoyant.rinet/80/google.com
+        /svc => /ph/80 ;                                    # /svc/google.com -> /ph/80/google.com
+        /svc => /$/io.buoyant.porthostPfx/ph ;              # /svc/google.com:80 -> /ph/80/google.com
+        /k8s => /#/io.l5d.k8s.h2 ;                          # /k8s/default/h2/foo -> /#/io.l5d.k8s.h2/default/h2/foo
+        /portNsSvc => /#/portNsSvcToK8s ;                   # /portNsSvc/h2/default/foo -> /k8s/default/h2/foo
+        /host => /portNsSvc/h2/default ;                    # /host/foo -> /portNsSvc/h2/default/foo
+        /host => /portNsSvc/h2 ;                            # /host/default/foo -> /portNsSvc/h2/default/foo
+        /svc => /$/io.buoyant.http.domainToPathPfx/host ;   # /svc/foo.default -> /host/default/foo
+
+    - label: h2-incoming
+      protocol: h2
+      servers:
+      - port: 4241
+        ip: 0.0.0.0
+      interpreter:
+        kind: default
+        transformers:
+        - kind: io.l5d.k8s.localnode
+          # hostNetwork: true # Uncomment if using host networking (eg for CNI)
+      dtab: |
+        /k8s => /#/io.l5d.k8s ;                             # /k8s/default/h2/foo -> /#/io.l5d.k8s/default/h2/foo
+        /portNsSvc => /#/portNsSvcToK8s ;                   # /portNsSvc/h2/default/foo -> /k8s/default/h2/foo
+        /host => /portNsSvc/h2/default ;                    # /host/foo -> /portNsSvc/h2/default/foo
+        /host => /portNsSvc/h2 ;                            # /host/default/foo -> /portNsSvc/h2/default/foo
+        /svc => /$/io.buoyant.http.domainToPathPfx/host ;   # /svc/foo.default -> /host/default/foo
+
+    - label: grpc-outgoing
+      protocol: h2
+      servers:
+      - port: 4340
+        ip: 0.0.0.0
+      identifier:
+        kind: io.l5d.header.path
+        segments: 1
+      dtab: |
+        /hp  => /$/inet ;                                # /hp/linkerd.io/8888 -> /$/inet/linkerd.io/8888
+        /svc => /$/io.buoyant.hostportPfx/hp ;           # /svc/linkerd.io:8888 -> /hp/linkerd.io/8888
+        /srv => /#/io.l5d.k8s.grpc/lifecycle1/grpc;         # /srv/service/package -> /#/io.l5d.k8s.grpc/lifecycle1/grpc/service/package
+        /svc => /$/io.buoyant.http.domainToPathPfx/srv ; # /svc/package.service -> /srv/service/package
+
+    - label: gprc-incoming
+      protocol: h2
+      servers:
+      - port: 4341
+        ip: 0.0.0.0
+      identifier:
+        kind: io.l5d.header.path
+        segments: 1
+      interpreter:
+        kind: default
+        transformers:
+        - kind: io.l5d.k8s.localnode
+          # hostNetwork: true # Uncomment if using host networking (eg for CNI)
+      dtab: |
+        /srv => /#/io.l5d.k8s/lifecycle1/grpc ;             # /srv/service/package -> /#/io.l5d.k8s/lifecycle1/grpc/service/package
+        /svc => /$/io.buoyant.http.domainToPathPfx/srv ; # /svc/package.service -> /srv/service/package
+
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    app: l5d
+  name: l5d
+  namespace: linkerd
+spec:
+  template:
+    metadata:
+      labels:
+        app: l5d
+    spec:
+      # hostNetwork: true # Uncomment to use host networking (eg for CNI)
+      volumes:
+      - name: l5d-config
+        configMap:
+          name: "l5d-config"
+      containers:
+      - name: l5d
+        image: buoyantio/linkerd:1.4.6
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        args:
+        - /io.buoyant/linkerd/config/config.yaml
+        ports:
+        - name: linkerd-metrics
+          containerPort: 9990
+        - name: http-outgoing
+          containerPort: 4140
+          hostPort: 4140
+        - name: http-incoming
+          containerPort: 4141
+        - name: h2-outgoing
+          containerPort: 4240
+          hostPort: 4240
+        - name: h2-incoming
+          containerPort: 4241
+        - name: grpc-outgoing
+          containerPort: 4340
+          hostPort: 4340
+        - name: grpc-incoming
+          containerPort: 4341
+        volumeMounts:
+        - name: "l5d-config"
+          mountPath: "/io.buoyant/linkerd/config"
+          readOnly: true
+
+      - name: kubectl
+        image: buoyantio/kubectl:v1.8.5
+        args:
+        - "proxy"
+        - "-p"
+        - "8001"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: l5d
+  namespace: linkerd
+spec:
+  selector:
+    app: l5d
+  type: LoadBalancer
+  ports:
+  - name: http-outgoing
+    port: 4140
+  - name: http-incoming
+    port: 4141
+  - name: h2-outgoing
+    port: 4240
+  - name: h2-incoming
+    port: 4241
+  - name: grpc-outgoing
+    port: 4340
+  - name: grpc-incoming
+    port: 4341
+  - name: http-ingress
+    port: 80
+  - name: h2-ingress
+    port: 8080
+
+
+
+
+
+---
+#
+# Prometheus
+#
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: prometheus
+  namespace: linkerd
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: linkerd-prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "pods"]
+  verbs: ["get", "list", "watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: linkerd-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: linkerd-prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: linkerd
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: prometheus
+  namespace: linkerd
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+  - name: admin-http
+    port: 9090
+    targetPort: 9090
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: prometheus-config
+  namespace: linkerd
+  labels:
+    app: prometheus
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval: 15s
+      scrape_timeout: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+    - job_name: 'prometheus'
+      static_configs:
+      - targets: ['localhost:9090']
+
+    # from https://grafana.com/dashboards/315
+    - job_name: kubernetes-nodes-cadvisor
+      scheme: https  # remove if you want to scrape metrics on insecure port
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      # Only for Kubernetes ^1.7.3.
+      # See: https://github.com/prometheus/prometheus/issues/2916
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+      metric_relabel_configs:
+      - action: replace
+        source_labels: [id]
+        regex: '^/machine\.slice/machine-rkt\\x2d([^\\]+)\\.+/([^/]+)\.service$'
+        target_label: rkt_container_name
+        replacement: '${2}-${1}'
+      - action: replace
+        source_labels: [id]
+        regex: '^/system\.slice/(.+)\.service$'
+        target_label: systemd_service_name
+        replacement: '${1}'
+      - source_labels:
+        - namespace
+        action: keep
+        regex: ^linkerd$
+
+    - job_name: 'linkerd'
+      metrics_path: /admin/metrics/prometheus
+
+      kubernetes_sd_configs:
+      - role: pod
+
+      relabel_configs:
+      # only collect from linkerd's
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_container_port_name]
+        regex:         ^linkerd;linkerd-metrics$
+        action:        keep
+      # strip off port
+      - source_labels: [__address__]
+        action: replace
+        target_label: instance
+        regex: (.+)(?::\d+)
+        replacement: $1
+
+      metric_relabel_configs:
+      - source_labels: [client]
+        action:        replace
+        target_label:  client
+        regex:         .*/([^/]+)
+        replacement:   $1
+      - source_labels: [service]
+        action:        replace
+        target_label:  service
+        regex:         .*/([^/]+)
+        replacement:   $1
+
+    - job_name: 'slow-cooker'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: ^linkerd;slow-cooker$
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: linkerd
+  labels:
+    app: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccount: prometheus
+      volumes:
+      - configMap:
+          name: prometheus-config
+        name: prometheus-config
+      containers:
+      - image: prom/prometheus:v2.3.1
+        name: prometheus
+        args:
+        - --storage.tsdb.retention=6h
+        - --config.file=/etc/prometheus/prometheus.yml
+        ports:
+        - containerPort: 9090
+          name: admin-http
+        volumeMounts:
+        - mountPath: /etc/prometheus
+          name: prometheus-config
+          readOnly: true
+#
+# Grafana
+#
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: grafana-config
+  namespace: linkerd
+  labels:
+    app: grafana
+data:
+  grafana.ini: |-
+    instance_name = linkerd-grafana
+
+    [auth]
+    disable_login_form = true
+
+    [auth.anonymous]
+    enabled = true
+    org_role = Editor
+
+    [auth.basic]
+    enabled = false
+
+    [analytics]
+    check_for_updates = false
+
+  datasources.yaml: |-
+    apiVersion: 1
+    datasources:
+    - name: prometheus
+      type: prometheus
+      access: proxy
+      orgId: 1
+      url: http://prometheus.linkerd.svc.cluster.local:9090
+      isDefault: true
+      jsonData:
+        timeInterval: "5s"
+      version: 1
+      editable: true
+
+  dashboards.yaml: |-
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: true
+      editable: true
+      options:
+        path: /var/lib/grafana/dashboards
+        homeDashboardId: grafana-proxy-challenge
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: linkerd
+  labels:
+    app: grafana
+spec:
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - image: gcr.io/linkerd-io/grafana:proxy-challenge
+        imagePullPolicy: Always
+        name: grafana
+        ports:
+        - containerPort: 3000
+          name: http
+        volumeMounts:
+        - mountPath: /etc/grafana
+          name: grafana-config
+          readOnly: true
+      volumes:
+      - configMap:
+          items:
+          - key: grafana.ini
+            path: grafana.ini
+          - key: datasources.yaml
+            path: provisioning/datasources/datasources.yaml
+          - key: dashboards.yaml
+            path: provisioning/dashboards/dashboards.yaml
+          name: grafana-config
+        name: grafana-config

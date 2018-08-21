@@ -21,7 +21,8 @@ Deploy a Linkerd daemonset to the `linkerd` namespace:
 
 ```bash
 kubectl create ns linkerd
-kubectl apply -f ../../k8s-daemonset/k8s/linkerd-rbac.yml
+sed 's/namespace: default/namespace: linkerd/g' ../../k8s-daemonset/k8s/linkerd-rbac.yml |
+  kubectl -n linkerd apply -f -
 kubectl apply -f ../../k8s-daemonset/k8s/servicemesh.yml
 ```
 

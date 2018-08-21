@@ -35,9 +35,13 @@ spec:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
               fieldPath: status.hostIP
         - name: http_proxy
-          value: http://l5d.linkerd.svc.cluster.local:4140
+          value: $(HOST_IP):4140
         command:
         - "/bin/sh"
         args:
@@ -91,9 +95,13 @@ spec:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
               fieldPath: status.hostIP
         - name: http_proxy
-          value: http://l5d.linkerd.svc.cluster.local:4340
+          value: $(HOST_IP):4340
         command:
         - "/bin/bash"
         args:
@@ -101,7 +109,7 @@ spec:
         - |
           exec \
           /out/bb point-to-point-channel \
-          --grpc-downstream-server=bb-broadcast.lifecycle1 \
+          --grpc-downstream-server=bb-broadcast:8080 \
           --h1-server-port=7070
         ports:
         - containerPort: 7070
@@ -144,9 +152,13 @@ spec:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
               fieldPath: status.hostIP
         - name: http_proxy
-          value: http://l5d.linkerd.svc.cluster.local:4340
+          value: $(HOST_IP):4340
         command:
         - "/bin/bash"
         args:
@@ -154,16 +166,16 @@ spec:
         - |
           exec \
           /out/bb broadcast-channel \
-          --grpc-downstream-server=bb-terminus1.lifecycle1 \
-          --grpc-downstream-server=bb-terminus2.lifecycle1 \
-          --grpc-downstream-server=bb-terminus3.lifecycle1 \
-          --grpc-downstream-server=bb-terminus4.lifecycle1 \
-          --grpc-downstream-server=bb-terminus5.lifecycle1 \
-          --grpc-downstream-server=bb-terminus6.lifecycle1 \
-          --grpc-downstream-server=bb-terminus7.lifecycle1 \
-          --grpc-downstream-server=bb-terminus8.lifecycle1 \
-          --grpc-downstream-server=bb-terminus9.lifecycle1 \
-          --grpc-downstream-server=bb-terminus10.lifecycle1 \
+          --grpc-downstream-server=bb-terminus1:9090 \
+          --grpc-downstream-server=bb-terminus2:9090 \
+          --grpc-downstream-server=bb-terminus3:9090 \
+          --grpc-downstream-server=bb-terminus4:9090 \
+          --grpc-downstream-server=bb-terminus5:9090 \
+          --grpc-downstream-server=bb-terminus6:9090 \
+          --grpc-downstream-server=bb-terminus7:9090 \
+          --grpc-downstream-server=bb-terminus8:9090 \
+          --grpc-downstream-server=bb-terminus9:9090 \
+          --grpc-downstream-server=bb-terminus10:9090 \
           --grpc-server-port=8080
         ports:
         - containerPort: 8080
@@ -314,9 +326,13 @@ spec:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
               fieldPath: status.hostIP
         - name: http_proxy
-          value: http://l5d.linkerd.svc.cluster.local:4340
+          value: $(HOST_IP):4340
         command:
         - "/bin/bash"
         args:
@@ -374,49 +390,49 @@ data:
     # give deployment time to fully roll out
     sleep 60
 
-    LAST=$(date +%s)
+    # LAST=$(date +%s)
 
-    while true; do
-      PODS=$(kubectl -n $LIFECYCLE_NS get po --field-selector=status.phase=Running --selector=app=bb-terminus -o jsonpath='{.items[*].metadata.name}')
+    # while true; do
+    #   PODS=$(kubectl -n $LIFECYCLE_NS get po --field-selector=status.phase=Running --selector=app=bb-terminus -o jsonpath='{.items[*].metadata.name}')
 
-      SPACES=$(echo "${PODS}" | awk -F" " '{print NF-1}')
-      POD_COUNT=$(($SPACES+1))
-      echo "found ${POD_COUNT} running pods"
+    #   SPACES=$(echo "${PODS}" | awk -F" " '{print NF-1}')
+    #   POD_COUNT=$(($SPACES+1))
+    #   echo "found ${POD_COUNT} running pods"
 
-      # restart each pod every minute
-      SLEEP_TIME=$(( 60 / $POD_COUNT ))
-      if [ $SLEEP_TIME = 0 ]; then
-        SLEEP_TIME=1
-      fi
+    #   # restart each pod every minute
+    #   SLEEP_TIME=$(( 60 / $POD_COUNT ))
+    #   if [ $SLEEP_TIME = 0 ]; then
+    #     SLEEP_TIME=1
+    #   fi
 
-      for POD in ${PODS}; do
-        kubectl -n $LIFECYCLE_NS delete po $POD
+    #   for POD in ${PODS}; do
+    #     kubectl -n $LIFECYCLE_NS delete po $POD
 
-        # bounce services every 30 seconds
-        NOW=$(date +%s)
-        if [ $(( NOW - LAST )) -gt 30 ]; then
-          echo "bouncing services..."
-          for i in `seq 1 10`; do
-            SVC=$(kubectl -n $LIFECYCLE_NS get svc/bb-terminus$i -o json)
-            kubectl -n $LIFECYCLE_NS delete svc/bb-terminus$i
-            echo $SVC | kubectl -n $LIFECYCLE_NS apply -f -
-          done
-          LAST=NOW
-        fi
+    #     # bounce services every 30 seconds
+    #     NOW=$(date +%s)
+    #     if [ $(( NOW - LAST )) -gt 30 ]; then
+    #       echo "bouncing services..."
+    #       for i in `seq 1 10`; do
+    #         SVC=$(kubectl -n $LIFECYCLE_NS get svc/bb-terminus$i -o json)
+    #         kubectl -n $LIFECYCLE_NS delete svc/bb-terminus$i
+    #         echo $SVC | kubectl -n $LIFECYCLE_NS apply -f -
+    #       done
+    #       LAST=NOW
+    #     fi
 
-        echo "sleeping for ${SLEEP_TIME} seconds..."
-        sleep $SLEEP_TIME
-      done
+    #     echo "sleeping for ${SLEEP_TIME} seconds..."
+    #     sleep $SLEEP_TIME
+    #   done
 
-      # redeploy the whole bb-terminus deployment
-      echo "redeploying bb-terminus deployment"
-      DEPLOY=$(kubectl -n $LIFECYCLE_NS get deploy/bb-terminus -o json)
-      echo $DEPLOY | sed -E 's/BANANA[0-9]+/BANANA'$(date +'%s')'/g' | kubectl -n $LIFECYCLE_NS apply -f -
+    #   # redeploy the whole bb-terminus deployment
+    #   echo "redeploying bb-terminus deployment"
+    #   DEPLOY=$(kubectl -n $LIFECYCLE_NS get deploy/bb-terminus -o json)
+    #   echo $DEPLOY | sed -E 's/BANANA[0-9]+/BANANA'$(date +'%s')'/g' | kubectl -n $LIFECYCLE_NS apply -f -
 
-      # give the new deployment time to roll out, before we start deleting pods again
-      echo "sleeping for 60 seconds..."
-      sleep 60
-    done
+    #   # give the new deployment time to roll out, before we start deleting pods again
+    #   echo "sleeping for 60 seconds..."
+    #   sleep 60
+    # done
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment
